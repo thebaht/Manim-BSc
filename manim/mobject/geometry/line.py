@@ -14,6 +14,7 @@ __all__ = [
     "RightAngle",
 ]
 
+import math
 from typing import Any, Sequence
 
 import numpy as np
@@ -609,6 +610,320 @@ class Arrow(Line):
                 family=False,
             )
         return self
+
+
+class AnchoredArrow(Line):
+    def __init__(
+        self,
+        start: VMobject,
+        end: VMobject,
+        *args: Any,
+        offset_start: np.ndarray = ORIGIN.copy(),
+        offset_end: np.ndarray = ORIGIN.copy(),
+        stroke_width: float = 6,
+        buff: float = 0,
+        max_tip_length_to_length_ratio: float = 0.25,
+        max_stroke_width_to_length_ratio: float = 5,
+        target_scaling: bool = True,
+        length_scaling: bool = True,
+        cap_scaling: bool = True,
+        stroke_cap: float = DEFAULT_STROKE_WIDTH,
+        tip_cap: float = DEFAULT_ARROW_TIP_LENGTH,
+        stroke_floor: float = -math.inf,
+        tip_floor: float = -math.inf,
+        match_scaling: bool = False,
+        scale_with: VMobject = None,
+        scale_factor: float = 0.7,
+        **kwargs,
+    ):
+        self.start_anchor = start
+        self.end_anchor = end
+        self.offset_start = offset_start
+        self.offset_end = offset_end
+        if not length_scaling:
+            self.max_tip_length_to_length_ratio = math.inf
+            self.max_stroke_width_to_length_ratio = math.inf
+        else:
+            self.max_tip_length_to_length_ratio = max_tip_length_to_length_ratio
+            self.max_stroke_width_to_length_ratio = max_stroke_width_to_length_ratio
+            self.initial_max_tip_length_to_length_ratio = max_tip_length_to_length_ratio
+            self.initial_max_stroke_width_to_length_ratio = (
+                max_stroke_width_to_length_ratio
+            )
+        self.target_scaling = target_scaling
+        self.scale_factor = scale_factor
+        self.matching_scaling = match_scaling
+        self.scale_with = scale_with
+        tip_shape = kwargs.pop("tip_shape", ArrowTriangleFilledTip)
+        super().__init__(
+            start=self.get_intersection(self.start_anchor),
+            end=self.get_intersection(self.end_anchor),
+            *args,
+            buff=buff,
+            stroke_width=stroke_width,
+            **kwargs,
+        )
+        # TODO, should this be affected when
+        # Arrow.set_stroke is called?
+        self.curr_tip_length = self.tip_length
+        self.initial_stroke_width = self.stroke_width
+        self.stroke_floor = stroke_floor
+        self.tip_floor = tip_floor
+        if not cap_scaling:
+            self.tip_cap = math.inf
+            self.stroke_cap = math.inf
+        else:
+            self.tip_cap = tip_cap
+            self.stroke_cap = stroke_cap
+        self.add_tip(tip_shape=tip_shape)
+        self._set_stroke_width_from_length()
+        self.scale(1)
+
+    def orientation(self, a, b, c):
+        return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+
+    def intersects(self, a_start, a_end, e_start, e_end):
+        return self.orientation(a_start, e_start, e_end) != self.orientation(
+            a_end, e_start, e_end
+        ) and self.orientation(a_start, a_end, e_start) != self.orientation(
+            a_start, a_end, e_end
+        )
+
+    def intersection_point(self, arrow_start, arrow_end, edge_start, edge_end):
+        d_arrow = arrow_end - arrow_start
+        d_edge = edge_end - edge_start
+        d_start = arrow_start - edge_start
+
+        d_arrow_perpendicular = np.empty_like(d_arrow)
+        d_arrow_perpendicular[0] = -d_arrow[1]
+        d_arrow_perpendicular[1] = d_arrow[0]
+
+        numerator = np.dot(d_arrow_perpendicular, d_start)
+        denominator = np.dot(d_arrow_perpendicular, d_edge)
+        return edge_start + d_edge * (numerator / denominator)
+
+    def get_intersection(self, shape: VMobject):
+        start_center = self.start_anchor.get_center() + self.offset_start
+        end_center = self.end_anchor.get_center() + self.offset_end
+
+        if isinstance(shape, TipableVMobject):
+            d_arrow = end_center - start_center
+            magnitude = math.hypot(d_arrow[0], d_arrow[1])
+            if magnitude == 0:
+                return start_center
+            if self.end_anchor == shape:
+                offset_length = math.hypot(self.offset_end[0], self.offset_end[1])
+                return [
+                    end_center[0]
+                    - (shape.radius - offset_length) * d_arrow[0] / magnitude,
+                    end_center[1]
+                    - (shape.radius - offset_length) * d_arrow[1] / magnitude,
+                    0,
+                ]
+            else:
+                offset_length = math.hypot(self.offset_start[0], self.offset_start[1])
+                return [
+                    start_center[0]
+                    + (shape.radius - offset_length) * d_arrow[0] / magnitude,
+                    start_center[1]
+                    + (shape.radius - offset_length) * d_arrow[1] / magnitude,
+                    0,
+                ]
+
+        vertex_groups = shape.get_vertex_groups()
+        d1, d2, d3 = vertex_groups.shape
+        looping_groups = np.resize(vertex_groups, (d1, d2 + 1, d3))
+        for i in range(d2):
+            if self.intersects(
+                start_center, end_center, looping_groups[0, i], looping_groups[0, i + 1]
+            ):
+                return self.intersection_point(
+                    start_center,
+                    end_center,
+                    looping_groups[0, i],
+                    looping_groups[0, i + 1],
+                )
+        if self.end_anchor == shape:
+            return end_center
+        else:
+            return start_center
+
+    def scale(self, factor, scale_tips=False, **kwargs):
+        if self.get_length() == 0:
+            return self
+
+        if scale_tips:
+            super().scale(factor, **kwargs)
+            self._set_stroke_width_from_length()
+            return self
+
+        has_tip = self.has_tip()
+        has_start_tip = self.has_start_tip()
+        if has_tip or has_start_tip:
+            old_tips = self.pop_tips()
+
+        super().scale(factor, **kwargs)
+        self._set_stroke_width_from_length()
+
+        if has_tip:
+            lenT = self.get_default_tip_length()
+            old_tips[0].width = lenT
+            old_tips[0].stretch_to_fit_height(lenT)
+            self.add_tip(tip=old_tips[0])
+
+        if has_start_tip:
+            lenT = self.get_default_tip_length()
+            old_tips[1].width = lenT
+            old_tips[1].stretch_to_fit_height(lenT)
+            self.add_tip(tip=old_tips[1], at_start=True)
+        return self
+
+    def get_normal_vector(self) -> np.ndarray:
+        p0, p1, p2 = self.tip.get_start_anchors()[:3]
+        return normalize(np.cross(p2 - p1, p1 - p0))
+
+    def reset_normal_vector(self):
+        self.normal_vector = self.get_normal_vector()
+        return self
+
+    def target_scale_factor(self):
+        if isinstance(self.end_anchor, Dot):
+            return self.scale_factor * 1.6
+        return self.scale_factor
+
+    def get_default_tip_length(self) -> float:
+        max_ratio = self.max_tip_length_to_length_ratio
+        if self.matching_scaling:
+            if self.scale_with == self:
+                return self.curr_tip_length
+            else:
+                self.curr_tip_length = self.scale_with.get_default_tip_length()
+                return self.curr_tip_length
+        elif self.target_scaling:
+            scaling_max = (
+                min(self.end_anchor.width, self.end_anchor.height)
+                * self.target_scale_factor()
+            )
+            self.curr_tip_length = max(
+                self.tip_floor,
+                min(self.tip_cap, max_ratio * self.get_length(), scaling_max),
+            )
+            return self.curr_tip_length
+        else:
+            self.curr_tip_length = max(
+                self.tip_floor, min(self.tip_cap, max_ratio * self.get_length())
+            )
+            return self.curr_tip_length
+
+    def _set_stroke_width_from_length(self):
+        max_ratio = self.max_stroke_width_to_length_ratio
+        if self.matching_scaling:
+            w = self.scale_with.stroke_width
+        elif self.target_scaling:
+            scaling_max = (
+                self.get_default_tip_length() * 11.4285714286
+            )  # default_tip_length * 11.4285714286 = default_stroke_width
+            w = max(
+                self.stroke_floor,
+                min(self.stroke_cap, max_ratio * self.get_length(), scaling_max),
+            )
+        else:
+            w = max(
+                self.stroke_floor, min(self.stroke_cap, max_ratio * self.get_length())
+            )
+
+        if config.renderer == RendererType.OPENGL:
+            self.set_stroke(
+                width=w,
+                recurse=False,
+            )
+        else:
+            self.set_stroke(
+                width=w,
+                family=False,
+            )
+        return self
+
+    def update_endpoints(
+        self,
+        start: VMobject,
+        end: VMobject,
+        start_x: float = 0.0,
+        start_y: float = 0.0,
+        end_x: float = 0.0,
+        end_y: float = 0.0,
+    ):
+        self.offset_start[0] = (start.width / 2) * start_x
+        self.offset_start[1] = (start.height / 2) * start_y
+        self.offset_end[0] = (end.width / 2) * end_x
+        self.offset_end[1] = (end.height / 2) * end_y
+        self.start_anchor = start
+        self.end_anchor = end
+        return super().put_start_and_end_on(
+            self.get_intersection(start), self.get_intersection(end)
+        )
+
+    def scaling(
+        self,
+        target: bool = False,
+        length: bool = False,
+        cap: bool = True,
+        stroke_cap: float = DEFAULT_STROKE_WIDTH,
+        tip_cap: float = DEFAULT_ARROW_TIP_LENGTH,
+        match: Line = None,
+        lock: bool = False,
+        floor: bool = False,
+        stroke_floor: float = 0,
+        tip_floor: float = 0,
+    ):
+        """
+        scaling(target=true)  -> scale with target, not matching another
+        scaling(target=true, length=true)  -> scale with target & length (default)
+        scaling(target=false, length=true)  -> default scaling of arrows
+        scaling(match=<line>) -> scale with match, not target
+        scaling(cap=false) -> uncap scaling
+        scaling(stroke_cap, tip_cap) -> cap scaling at values
+        scaling(floor=true, stroke_floor, tip_floor) -> floor scaling at values
+        scaling(lock=true) -> lock scaling to own settings
+        """
+        if target:
+            self.target_scaling = True
+            self.matching_scaling = False
+
+        if length:
+            self.max_tip_length_to_length_ratio = (
+                self.initial_max_tip_length_to_length_ratio
+            )
+            self.max_stroke_width_to_length_ratio = (
+                self.initial_max_stroke_width_to_length_ratio
+            )
+        else:
+            self.max_tip_length_to_length_ratio = math.inf
+            self.max_stroke_width_to_length_ratio = math.inf
+
+        if cap:
+            self.tip_cap = tip_cap
+            self.stroke_cap = stroke_cap
+        else:
+            self.tip_cap = math.inf
+            self.stroke_cap = math.inf
+
+        if floor:
+            self.tip_floor = tip_floor
+            self.stroke_floor = stroke_floor
+        else:
+            self.tip_floor = -math.inf
+            self.stroke_floor = -math.inf
+
+        if match is not None:
+            self.matching_scaling = True
+            self.scale_with = match
+
+        if lock:
+            self.matching_scaling = True
+            self.scale_with = self
+
+        return self.scale(1)
 
 
 class Vector(Arrow):
