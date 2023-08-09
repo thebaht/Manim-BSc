@@ -618,8 +618,8 @@ class AnchoredArrow(Line):
         start: VMobject,
         end: VMobject,
         *args: Any,
-        offset_start: np.ndarray = ORIGIN.copy(),
-        offset_end: np.ndarray = ORIGIN.copy(),
+        offset_start: np.ndarray | None = None,
+        offset_end: np.ndarray | None = None,
         stroke_width: float = 6,
         buff: float = 0,
         max_tip_length_to_length_ratio: float = 0.25,
@@ -638,18 +638,22 @@ class AnchoredArrow(Line):
     ):
         self.start_anchor = start
         self.end_anchor = end
-        self.offset_start = offset_start
-        self.offset_end = offset_end
+        if offset_start is None:
+            self.offset_start = np.array([0.0, 0.0, 0.0])
+        else:
+            self.offset_start = offset_start
+        if offset_end is None:
+            self.offset_end = np.array([0.0, 0.0, 0.0])
+        else:
+            self.offset_end = offset_end
         if not length_scaling:
             self.max_tip_length_to_length_ratio = math.inf
             self.max_stroke_width_to_length_ratio = math.inf
         else:
             self.max_tip_length_to_length_ratio = max_tip_length_to_length_ratio
             self.max_stroke_width_to_length_ratio = max_stroke_width_to_length_ratio
-            self.initial_max_tip_length_to_length_ratio = max_tip_length_to_length_ratio
-            self.initial_max_stroke_width_to_length_ratio = (
-                max_stroke_width_to_length_ratio
-            )
+        self.initial_max_tip_length_to_length_ratio = max_tip_length_to_length_ratio
+        self.initial_max_stroke_width_to_length_ratio = max_stroke_width_to_length_ratio
         self.target_scaling = target_scaling
         self.scale_factor = scale_factor
         self.matching_scaling = match_scaling
@@ -663,8 +667,6 @@ class AnchoredArrow(Line):
             stroke_width=stroke_width,
             **kwargs,
         )
-        # TODO, should this be affected when
-        # Arrow.set_stroke is called?
         self.curr_tip_length = self.tip_length
         self.initial_stroke_width = self.stroke_width
         self.stroke_floor = stroke_floor
@@ -680,7 +682,7 @@ class AnchoredArrow(Line):
         self.scale(1)
 
     def orientation(self, a, b, c):
-        return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+        return (b[1] - a[1]) * (c[0] - b[0]) > (c[1] - b[1]) * (b[0] - a[0])
 
     def intersects(self, a_start, a_end, e_start, e_end):
         return self.orientation(a_start, e_start, e_end) != self.orientation(
@@ -715,18 +717,18 @@ class AnchoredArrow(Line):
                 offset_length = math.hypot(self.offset_end[0], self.offset_end[1])
                 return [
                     end_center[0]
-                    - (shape.radius - offset_length) * d_arrow[0] / magnitude,
+                    - ((shape.width / 2) - offset_length) * d_arrow[0] / magnitude,
                     end_center[1]
-                    - (shape.radius - offset_length) * d_arrow[1] / magnitude,
+                    - ((shape.width / 2) - offset_length) * d_arrow[1] / magnitude,
                     0,
                 ]
             else:
                 offset_length = math.hypot(self.offset_start[0], self.offset_start[1])
                 return [
                     start_center[0]
-                    + (shape.radius - offset_length) * d_arrow[0] / magnitude,
+                    + ((shape.width / 2) - offset_length) * d_arrow[0] / magnitude,
                     start_center[1]
-                    + (shape.radius - offset_length) * d_arrow[1] / magnitude,
+                    + ((shape.width / 2) - offset_length) * d_arrow[1] / magnitude,
                     0,
                 ]
 
