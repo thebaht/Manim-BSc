@@ -634,6 +634,8 @@ class AnchoredArrow(Line):
         match_scaling: bool = False,
         scale_with: VMobject = None,
         scale_factor: float = 0.7,
+        scale_factor_dot: float = 1.6,
+        target_scaling_tip_to_stroke_ratio: float = 11.4285714286,
         **kwargs,
     ):
         self.start_anchor = start
@@ -656,6 +658,8 @@ class AnchoredArrow(Line):
         self.initial_max_stroke_width_to_length_ratio = max_stroke_width_to_length_ratio
         self.target_scaling = target_scaling
         self.scale_factor = scale_factor
+        self.scale_factor_dot = scale_factor_dot
+        self.target_scaling_tip_to_stroke_ratio = target_scaling_tip_to_stroke_ratio
         self.matching_scaling = match_scaling
         self.scale_with = scale_with
         tip_shape = kwargs.pop("tip_shape", ArrowTriangleFilledTip)
@@ -711,8 +715,11 @@ class AnchoredArrow(Line):
         if isinstance(shape, TipableVMobject):
             d_arrow = end_center - start_center
             magnitude = math.hypot(d_arrow[0], d_arrow[1])
-            if magnitude == 0:
-                return start_center
+            if magnitude < (shape.width / 2):
+                if self.end_anchor == shape:
+                    return end_center
+                else:
+                    return start_center
             if self.end_anchor == shape:
                 offset_length = math.hypot(self.offset_end[0], self.offset_end[1])
                 return [
@@ -770,13 +777,13 @@ class AnchoredArrow(Line):
         if has_tip:
             lenT = self.get_default_tip_length()
             old_tips[0].width = lenT
-            old_tips[0].stretch_to_fit_height(lenT)
+            old_tips[0].height = lenT
             self.add_tip(tip=old_tips[0])
 
         if has_start_tip:
             lenT = self.get_default_tip_length()
             old_tips[1].width = lenT
-            old_tips[1].stretch_to_fit_height(lenT)
+            old_tips[1].height = lenT
             self.add_tip(tip=old_tips[1], at_start=True)
         return self
 
@@ -790,7 +797,7 @@ class AnchoredArrow(Line):
 
     def target_scale_factor(self):
         if isinstance(self.end_anchor, Dot):
-            return self.scale_factor * 1.6
+            return self.scale_factor * self.scale_factor_dot
         return self.scale_factor
 
     def get_default_tip_length(self) -> float:
@@ -823,8 +830,8 @@ class AnchoredArrow(Line):
             w = self.scale_with.stroke_width
         elif self.target_scaling:
             scaling_max = (
-                self.get_default_tip_length() * 11.4285714286
-            )  # default_tip_length * 11.4285714286 = default_stroke_width
+                self.get_default_tip_length() * self.target_scaling_tip_to_stroke_ratio
+            )
             w = max(
                 self.stroke_floor,
                 min(self.stroke_cap, max_ratio * self.get_length(), scaling_max),
@@ -868,6 +875,9 @@ class AnchoredArrow(Line):
     def scaling(
         self,
         target: bool = False,
+        target_factor: float = 0.7,
+        target_factor_dot: float = 1.6,
+        target_tip_to_stroke_ratio: float = 11.4285714286,
         length: bool = False,
         cap: bool = True,
         stroke_cap: float = DEFAULT_STROKE_WIDTH,
@@ -891,6 +901,9 @@ class AnchoredArrow(Line):
         if target:
             self.target_scaling = True
             self.matching_scaling = False
+            self.scale_factor = target_factor
+            self.scale_factor_dot = target_factor_dot
+            self.target_scaling_tip_to_stroke_ratio = target_tip_to_stroke_ratio
 
         if length:
             self.max_tip_length_to_length_ratio = (
