@@ -404,3 +404,13 @@ class Scaling_Demo(Scene):
         self.play(eLim.animate.scale(5).shift(0.01 * RIGHT))
 
         self.wait(2)
+
+
+
+class Test(Scene):
+    def construct(self):
+        s1 = Rectangle(color="#f54272", height=1, width=1, stroke_width=10).shift(2*RIGHT)
+        s2 = Rectangle(color="#f54272", height=1, width=1, stroke_width=10).shift(2*LEFT)
+        a = AnchoredArrow(start=s1, end=s2)
+        
+        self.add(s1, s2, a)
